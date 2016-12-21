@@ -1,0 +1,203 @@
+#set ($dotgetFields = ".getFields()")
+#set ($dotExecuteQuery = ".ExecuteQuery()")
+#set ($dottoString = ".toString()")
+#set ($dotset = ".set")
+#set ($dotget = ".get")
+#set ($dot = ".")
+#set ($dothasFields = ".hasFields()")
+#set ($dotgetAsCsv = ".getAsCsv()")
+
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Date;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Iterator;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.sql.Date;
+import java.sql.Time;
+
+import org.hibernate.HibernateException;
+import org.hibernate.Query;
+import org.hibernate.SQLQuery;
+import org.hibernate.Session;
+import org.hibernate.Transaction;
+
+import com.ims.query.builder.*;
+
+#foreach ($query in $queries)
+//$query.getName() query	
+public class Query$query.getName() extends ImsHQLQuery
+{
+	#foreach ($param in $query.getParams())
+	private $param.getNormalizedFieldType() $param.getFieldAltered();
+	#end
+	
+	public Query$query.getName()(Session session)
+	{
+		super();
+		
+		this.session = session;
+
+		this.dsName = "$query.getName()";
+		
+		this.fieldNames = new String[$query.getSelectedFields().size()];
+		this.fieldTypes = new String[$query.getSelectedFields().size()];
+		this.xmlField = new StringBuffer[$query.getSelectedFields().size()];
+		this.maxFieldSize = new int[$query.getSelectedFields().size()];
+		
+		#set( $i = 0 )
+		#foreach ($selectedfield in $query.getSelectedFields())
+		this.fieldNames[$i] = "$selectedfield.getAgregatePrefix()$selectedfield.getFieldName()";
+		this.fieldTypes[$i] = "$selectedfield.getFieldType()";
+		this.maxFieldSize[$i] = 1;
+		#set( $i = $i + 1 )
+		#end
+	}
+
+	#foreach ($param in $query.getParams())
+	public void set$param.getFieldAltered()($param.getNormalizedFieldType() _$param.getFieldAltered())
+	{
+		this.$param.getFieldAltered() = _$param.getFieldAltered();
+	}
+	#end
+
+	
+	public void ExecuteQuery() throws HibernateException
+	{
+		Transaction tx = null;
+		DataField field = null;
+		Iterator it = null;
+		String hql = "$query.getHqlString()";
+		
+		int rows = 0;
+		
+		#if($query.isNative() == true)
+		SQLQuery q = null;
+		#else
+		Query q = null;
+		#end
+		
+		long time1 = System.currentTimeMillis();
+
+		#if($query.getStartIndex() != -1 && $query.getEndIndex() != -1)
+		Map seeds = new HashMap();
+		#foreach ($param in $query.getParams())
+		seeds.put("$param.getField()", new SeedHolder("$param.getField()", "$param.getNormalizedFieldType()", $param.getFieldAltered()));
+		#end
+		startIndex = $query.getStartIndex();
+		endIndex = $query.getEndIndex();
+		xmlClauses = "$query.getXmlClausesFormatted()";
+		hql = applyValidators(seeds, hql);
+		#else
+		updateUsedSeeds(hql);
+		#end
+
+		tx = session.beginTransaction();
+		try
+		{
+		#if($query.isNative() == true)
+		q = session.createSQLQuery(hql);
+		#else
+		q = session.createQuery(hql);
+		#end
+		}
+		catch(Exception e)
+		{
+			if(this.systemLog != null)
+			{
+				systemLog.append("Query '" + this.dsName + "' has thrown an error:");
+				systemLog.append(CRNL);
+			}
+		
+			throw e;
+		}
+		
+		#foreach ($param in $query.getParams())
+		###if($query.getStartIndex() != -1 && $query.getEndIndex() != -1)
+		if(usedSeeds.contains("$param.getField()"))
+			q.setParameter("$param.getField()", $param.getFieldAltered(), getParamType("$param.getNormalizedFieldType()"));			
+		###else	
+			##q.setParameter("$param.getField()", $param.getFieldAltered(), getParamType("$param.getNormalizedFieldType()"));
+		###end	
+		#end
+		#if($query.getLimit() != 0)
+		q.setMaxResults($query.getLimit());
+		#end	
+
+		try
+		{
+			it = q.list().iterator();
+			tx.commit();
+		}
+		catch(Exception e)
+		{
+			if(this.systemLog != null)
+			{
+				systemLog.append("Query '" + this.dsName + "' has thrown an error:");
+				systemLog.append(CRNL);
+			}
+		
+			throw e;
+		}
+		
+		if ( !it.hasNext() ) 
+		{
+			setHasFields(false);
+		}
+		else
+		{
+			while ( it.hasNext() ) 
+			{
+				field_values = makeObjectArray(it.next());
+				addCsvRow(field_values);	
+				rows++;
+			}
+		}	
+		
+		long time2 = System.currentTimeMillis();
+		
+		if(this.systemLog != null)
+		{
+			systemLog.append("Query '" + this.dsName + "' took " + (time2 - time1) + " ms and returned " + rows + " record(s).");
+			systemLog.append(CRNL);
+		}
+	}	
+}	
+#end
+
+#set( $i = 0 )
+#foreach ($query in $queries)
+Query$query.getName() q$i = new Query$query.getName()(session);
+q$i${dot}setSystemLog(systemLog);
+
+#set ( $j = 0 )
+#foreach ($param in $query.getParams())
+q$i$dotset$param.getFieldAltered()($query.getParamNameByIndex($j));
+#set( $j = $j + 1 )
+#end
+
+try
+{
+	q$i$dotExecuteQuery;
+} 
+catch (HibernateException e1)
+{
+	e1.printStackTrace();
+	throw e1;
+}
+#set( $i = $i + 1 )
+#end
+
+StringBuffer sb = new StringBuffer(16*1024);
+
+#set( $i = 0 )
+#foreach ($query in $queries)
+sb.append(q$i$dotgetAsCsv);
+#set( $i = $i + 1 )
+#end
+sb.append(IMS_SEEDS_123);
+
+return sb.toString();

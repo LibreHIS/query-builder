@@ -1,0 +1,166 @@
+#set ($dotgetFields = ".getFields()")
+#set ($dotExecuteQuery = ".ExecuteQuery()")
+#set ($dottoString = ".toString()")
+#set ($dotset = ".set")
+#set ($dotget = ".get")
+#set ($dothasFields = ".hasFields()")
+#set ($dotgetAsXml = ".getAsXml()")
+
+import java.util.ArrayList;
+import java.util.Date;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Iterator;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.sql.Date;
+import java.sql.Time;
+
+import org.hibernate.HibernateException;
+import org.hibernate.Query;
+import org.hibernate.Session;
+import org.hibernate.Transaction;
+
+import com.ims.query.builder.*;
+
+#foreach ($query in $queries)
+//$query.getName() query	
+public class Query$query.getName() extends ImsHQLQuery
+{
+	#foreach ($param in $query.getParams())
+	private $param.getNormalizedFieldType() $param.getFieldAltered();
+	#end
+	
+	public Query$query.getName()(Session session)
+	{
+		super();
+		
+		this.session = session;
+
+		this.dsName = "$query.getName()";
+		
+		this.fieldNames = new String[$query.getSelectedFields().size()];
+		this.fieldTypes = new String[$query.getSelectedFields().size()];
+		this.xmlField = new StringBuffer[$query.getSelectedFields().size()];
+		
+		#set( $i = 0 )
+		#foreach ($selectedfield in $query.getSelectedFields())
+		this.fieldNames[$i] = "$selectedfield.getAgregatePrefix()$selectedfield.getFieldName()";
+		this.fieldTypes[$i] = "$selectedfield.getFieldType()";
+		#set( $i = $i + 1 )
+		#end
+	}
+
+	#foreach ($param in $query.getParams())
+	public void set$param.getFieldAltered()($param.getNormalizedFieldType() _$param.getFieldAltered())
+	{
+		this.$param.getFieldAltered() = _$param.getFieldAltered();
+	}
+	#end
+
+	
+	public void ExecuteQuery() throws HibernateException
+	{
+		Transaction tx = null;
+		DataField field = null;
+		Iterator it = null;
+
+		tx = session.beginTransaction();
+		Query q = session.createQuery("$query.getHqlString()");
+		#foreach ($param in $query.getParams())
+		q.setParameter("$param.getField()", $param.getFieldAltered(), getParamType("$param.getNormalizedFieldType()"));
+		#end
+
+		try
+		{
+			it = q.list().iterator();
+			tx.commit();
+		}
+		catch(HibernateException e)
+		{
+			throw e;
+		}
+		
+		if ( !it.hasNext() ) 
+		{
+			setHasFields(false);
+
+			#set( $i = 0 )
+			#foreach ($selectedfield in $query.getSelectedFields())
+			addFieldValue($i,"");
+			#set( $i = $i + 1 )
+			#end
+			
+		}
+		else
+		{
+			#set( $i = 0 )
+			#foreach ($selectedfield in $query.getSelectedFields())
+			$selectedfield.getFieldType() f$i = null;
+			#set( $i = $i + 1 )
+			#end
+
+			while ( it.hasNext() ) 
+			{
+				Object[] row = (Object[]) it.next();
+	
+				#set( $i = 0 )
+				#foreach ($selectedfield in $query.getSelectedFields())
+				f$i = ($selectedfield.getFieldType()) row[$i];
+				#set( $i = $i + 1 )
+				#end
+				
+				field_values = row;
+	
+				#set( $i = 0 )
+				#foreach ($selectedfield in $query.getSelectedFields())
+				#if($selectedfield.getFieldType() == "java.sql.Date")
+				addFieldValue($i,(f$i == null ? "" : qbDateFormat.format(f$i)));
+				#elseif($selectedfield.getFieldType() == "java.sql.Time")
+				addFieldValue($i,(f$i == null ? "" : qbTimeFormat.format(f$i)));				
+				#elseif($selectedfield.getFieldType() == "java.util.Date")
+				addFieldValue($i,(f$i == null ? "" : qbDateTimeFormat.format(f$i)));				
+				#else
+				addFieldValue($i,(f$i == null ? "" : f$i$dottoString));
+				#end
+				#set( $i = $i + 1 )
+				#end
+			}
+		}	
+	}	
+}	
+#end
+
+#set( $i = 0 )
+#foreach ($query in $queries)
+Query$query.getName() q$i = new Query$query.getName()(session);
+
+#set ( $j = 0 )
+#foreach ($param in $query.getParams())
+q$i$dotset$param.getFieldAltered()($query.getParamNameByIndex($j));
+#set( $j = $j + 1 )
+#end
+
+try
+{
+	q$i$dotExecuteQuery;
+} 
+catch (HibernateException e1)
+{
+	e1.printStackTrace();
+}
+#set( $i = $i + 1 )
+#end
+
+StringBuffer sb = new StringBuffer(16*1024);
+sb.append("<?xml version=\"1.0\"?><ds>");
+
+#set( $i = 0 )
+#foreach ($query in $queries)
+sb.append(q$i$dotgetAsXml);
+#set( $i = $i + 1 )
+#end
+sb.append(IMS_SEEDS_123);
+sb.append("</ds>");
+
+return sb.toString();
